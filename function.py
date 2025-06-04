@@ -1,7 +1,6 @@
 import psycopg2
 
-
-def getopenconnection(user='postgres', password='root', dbname='db_assign1'):
+def getopenconnection(user='postgres', password='123456', dbname='postgres'):
     """
     Create and return a PostgreSQL connection
     """
@@ -15,7 +14,7 @@ def create_db(dbname):
     :return:None
     """
     # Connect to the default database
-    con = getopenconnection(dbname='db_assign1')
+    con = getopenconnection(dbname='postgres')
     con.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
     cur = con.cursor()
 
@@ -55,7 +54,7 @@ def loadratings(ratingstablename, ratingsfilepath, openconnection):
     """
 
     # Ensure database exists before proceeding
-    create_db('db_assign1')  # Create database if it doesn't exist
+    create_db('db_assign')  # Create database if it doesn't exist
 
     # Get cursor from the connection
     cur = openconnection.cursor()
@@ -139,6 +138,68 @@ def test_loadratings():
     except Exception as e:
         print(f"Test failed: {str(e)}")
 
+def rangepartition(ratingstablename, numberofpartitions, openconnection):
+    """
+        Function to create partitions of main table using round robin approach.
+
+        Args:
+            ratingstablename (str): Name of the main ratings table
+            numberofpartitions (int): Number of partitions to create
+            openconnection: PostgreSQL connection object
+        """
+
+    cur = openconnection.cursor()
+    RANGE_TABLE_PREFIX = "range_part"
+    # range value in each horizontal fragment
+    delta = 5 / numberofpartitions
+    try:
+
+        for i in range(numberofpartitions):
+            # Step1: Create partition tables
+            minRange = i * delta
+            maxRange = minRange + delta
+            table_name = RANGE_TABLE_PREFIX + str(i)
+            create_table_query = f"""
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            userid INTEGER,
+                            movieid INTEGER,
+                            rating REAL
+                        );
+                        """
+            cur.execute(create_table_query)
+
+            # Clear existing data if any
+            cur.execute(f"DELETE FROM {table_name};")
+
+            #Step 2: Insert data from ratingtables to each range_part table
+            if i == 0:
+                insert_data_query = f"""
+                        INSERT INTO {table_name} (userid, movieid, rating) 
+                            SELECT userid, movieid, rating 
+                            FROM {ratingstablename} 
+                            WHERE rating >= {str(minRange)} AND rating <= {str(maxRange)};
+                """
+            else:
+                insert_data_query = f"""
+                        INSERT INTO {table_name} (userid, movieid, rating) 
+                            SELECT userid, movieid, rating 
+                            FROM {ratingstablename} 
+                            WHERE rating > {str(minRange)} AND rating <= {str(maxRange)};
+                """
+            cur.execute(insert_data_query)
+
+        #Commit Transaction
+        openconnection.commit()
+        print(f"Successfully create {numberofpartitions} range partitions")
+    except Exception as e:
+        # Rollback in case of error
+        openconnection.rollback()
+        print(f"Error creating range partitions: {str(e)}")
+        raise e
+
+    finally:
+        # Close cursor (but not connection as per requirement)
+        cur.close()
 
 def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
     """
@@ -248,6 +309,63 @@ def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
         openconnection.commit()
         print(f"Successfully inserted record into {ratingstablename} and {partition_table_name}")
 
+    except Exception as e:
+        # Rollback in case of error
+        openconnection.rollback()
+        print(f"Error inserting record: {str(e)}")
+        raise e
+
+    finally:
+        # Close cursor (but not connection as per requirement)
+        cur.close()
+
+def rangeinsert(ratingstablename, userid, itemid, rating, openconnection):
+    """
+        Function to insert a new row into the main table and specific partition based on round robin approach.
+
+        Args:
+            ratingstablename (str): Name of the main ratings table
+            userid (int): User ID of the new record
+            itemid (int): Movie ID of the new record
+            rating (float): Rating value of the new record
+            openconnection: PostgreSQL connection object
+    """
+
+    cur = openconnection.cursor()
+    RANGE_TABLE_PREFIX = "range_part"
+
+    if rating > 5 or rating < 0:
+        return f"Rating value is invalid"
+
+    try:
+        # Step1: Insert main table
+        insert_table_query = f"""
+                INSERT INTO {ratingstablename} (userid, movieid, rating) 
+                VALUES (%s, %s, %s);
+            """
+        cur.execute(insert_table_query, (userid, itemid, rating))
+
+        #Step 2: Count numbers of partitions
+        numbers = count_partitions(RANGE_TABLE_PREFIX, openconnection)
+
+        #Step 3: Calculate range value of each partition
+        delta = 5 / numbers # max rating = 5
+
+        #Step 4: Define partition that will insert
+        index = int(rating/delta)
+        if rating % delta == 0 and index != 0:
+            index -=1
+
+        # Step 5: Insert data into partition
+        table_name = RANGE_TABLE_PREFIX + str(index)
+        insert_query = (f"""
+            INSERT INTO {table_name} (userid, movieid, rating) 
+            VALUES (%s, %s, %s)
+            """)
+        cur.execute(insert_query, (userid, itemid, rating))
+
+        openconnection.commit()
+        print(f"Successfully inserted record into {ratingstablename} and {table_name}")
     except Exception as e:
         # Rollback in case of error
         openconnection.rollback()
