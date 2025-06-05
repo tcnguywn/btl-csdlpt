@@ -1,10 +1,11 @@
 import psycopg2
-
-
-def getopenconnection(user='postgres', password='root', dbname='db_assign1'):
+import time
+DATABASE = 'postgres' 
+def getopenconnection(user='postgres', password='ROOT', dbname=DATABASE):
     """
     Create and return a PostgreSQL connection
     """
+    DATABASE = dbname 
     return psycopg2.connect("dbname='" + dbname + "' user='" + user + "' host='localhost' password='" + password + "'")
 
 
@@ -15,7 +16,7 @@ def create_db(dbname):
     :return:None
     """
     # Connect to the default database
-    con = getopenconnection(dbname='db_assign1')
+    con = getopenconnection(dbname=DATABASE)
     con.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
     cur = con.cursor()
 
@@ -55,7 +56,7 @@ def loadratings(ratingstablename, ratingsfilepath, openconnection):
     """
 
     # Ensure database exists before proceeding
-    create_db('db_assign1')  # Create database if it doesn't exist
+    create_db(DATABASE)  # Create database if it doesn't exist
 
     # Get cursor from the connection
     cur = openconnection.cursor()
@@ -118,7 +119,7 @@ def test_loadratings():
         conn = getopenconnection()
 
         # Load ratings
-        loadratings('ratings', 'test_data.dat', conn)
+        loadratings('ratings', r"E:\DefaultFeature\Downloads\bai_tap_lon_CSDL_phan_tan-main\bai_tap_lon_CSDL_phan_tan-main\test_data.dat", conn)
 
         # Verify data loaded
         cur = conn.cursor()
@@ -139,6 +140,58 @@ def test_loadratings():
     except Exception as e:
         print(f"Test failed: {str(e)}")
 
+def rangepartition(ratingstablename, numberofpartitions, openconnection):
+    """
+    Function to create range partitions for a ratings table based on the Rating value.
+    """
+    start_time = time.time()  
+    RANGE_TABLE_PREFIX = 'range_part'
+    cur = openconnection.cursor()
+
+    try:
+        for i in range(numberofpartitions):
+            cur.execute(f"DROP TABLE IF EXISTS {RANGE_TABLE_PREFIX}{i};")
+
+        interval = 5.0 / numberofpartitions
+
+        for i in range(numberofpartitions):
+            table_name = f"{RANGE_TABLE_PREFIX}{i}"
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    userid INTEGER,
+                    movieid INTEGER,
+                    rating REAL
+                );
+            """)
+            
+            if i == 0:
+                cur.execute(f"""
+                    INSERT INTO {table_name}
+                    SELECT * FROM {ratingstablename}
+                    WHERE rating >= {i * interval} AND rating <= {(i + 1) * interval};
+                """)
+            else:
+                cur.execute(f"""
+                    INSERT INTO {table_name}
+                    SELECT * FROM {ratingstablename}
+                    WHERE rating > {i * interval} AND rating <= {(i + 1) * interval};
+                """)
+
+        openconnection.commit()
+
+        # Kết thúc đo thời gian
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Successfully created {numberofpartitions} range partitions in {elapsed_time:.4f} seconds.")
+
+    except Exception as e:
+        openconnection.rollback()
+        print(f"Error in rangepartition: {str(e)}")
+        raise
+
+    finally:
+        cur.close()
+
 
 def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
     """
@@ -149,7 +202,7 @@ def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
         numberofpartitions (int): Number of partitions to create
         openconnection: PostgreSQL connection object
     """
-
+    start_time = time.time()  
     cur = openconnection.cursor()
     RROBIN_TABLE_PREFIX = 'rrobin_part'
 
@@ -189,7 +242,9 @@ def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
 
         # Commit the transaction
         openconnection.commit()
-        print(f"Successfully created {numberofpartitions} round robin partitions")
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Successfully created {numberofpartitions} round robin partitions in {elapsed_time:.4f} seconds.")
 
     except Exception as e:
         # Rollback in case of error
