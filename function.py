@@ -1,6 +1,8 @@
 import psycopg2
 
-def getopenconnection(user='postgres', password='123456', dbname='postgres'):
+
+
+def getopenconnection(user='postgres', password='root', dbname='db_assign1'):
     """
     Create and return a PostgreSQL connection
     """
@@ -54,7 +56,7 @@ def loadratings(ratingstablename, ratingsfilepath, openconnection):
     """
 
     # Ensure database exists before proceeding
-    create_db('db_assign')  # Create database if it doesn't exist
+    create_db('db_assign1')  # Create database if it doesn't exist
 
     # Get cursor from the connection
     cur = openconnection.cursor()
@@ -105,38 +107,6 @@ def loadratings(ratingstablename, ratingsfilepath, openconnection):
     finally:
         # Close cursor (but not connection as per requirement)
         cur.close()
-
-
-# Test function to demonstrate usage
-def test_loadratings():
-    """
-    Test function to show how to use loadratings
-    """
-    try:
-        # Create connection
-        conn = getopenconnection()
-
-        # Load ratings
-        loadratings('ratings', 'test_data.dat', conn)
-
-        # Verify data loaded
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM ratings;")
-        count = cur.fetchone()[0]
-        print(f"Total records loaded: {count}")
-
-        # Show sample data
-        cur.execute("SELECT * FROM ratings LIMIT 5;")
-        rows = cur.fetchall()
-        print("Sample data:")
-        for row in rows:
-            print(f"UserID: {row[0]}, MovieID: {row[1]}, Rating: {row[2]}")
-
-        cur.close()
-        conn.close()
-
-    except Exception as e:
-        print(f"Test failed: {str(e)}")
 
 def rangepartition(ratingstablename, numberofpartitions, openconnection):
     """
