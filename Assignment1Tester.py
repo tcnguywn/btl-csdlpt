@@ -1,7 +1,7 @@
 #
 # Tester for the assignement1
 #
-DATABASE_NAME = 'dds_assign1'
+DATABASE_NAME = 'db_assign1'
 
 # TODO: Change these as per your code
 RATINGS_TABLE = 'ratings'
