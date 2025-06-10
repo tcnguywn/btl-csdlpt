@@ -103,73 +103,68 @@ def loadratings(ratingstablename, ratingsfilepath, openconnection):
     total_time = end_time - start_time
     print(f"Operation completed in {total_time:.4f} seconds")
 
-
 def rangepartition(ratingstablename, numberofpartitions, openconnection):
-    start_time = time.time()
-
+    """
+    Function to create range partitions for a ratings table based on the Rating value.
+    """
+    start_time = time.time()  
+    RANGE_TABLE_PREFIX = 'range_part'
     cur = openconnection.cursor()
-    RANGE_TABLE_PREFIX = "range_part"
-    # range value in each horizontal fragment
-    delta = 5 / numberofpartitions
 
     try:
         for i in range(numberofpartitions):
-            # Step1: Create partition tables
-            minRange = i * delta
-            maxRange = minRange + delta
-            table_name = RANGE_TABLE_PREFIX + str(i)
+            cur.execute(f"DROP TABLE IF EXISTS {RANGE_TABLE_PREFIX}{i};")
 
-            create_table_query = f"""
-                        CREATE TABLE IF NOT EXISTS {table_name} (
-                            userid INTEGER,
-                            movieid INTEGER,
-                            rating REAL
-                        );
-                        """
-            cur.execute(create_table_query)
+        interval = 5.0 / numberofpartitions
 
-            # Clear existing data if any
-            cur.execute(f"DELETE FROM {table_name};")
-
-            # Step 2: Insert data from ratingtables to each range_part table
+        for i in range(numberofpartitions):
+            table_name = f"{RANGE_TABLE_PREFIX}{i}"
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    userid INTEGER,
+                    movieid INTEGER,
+                    rating REAL
+                );
+            """)
+            
             if i == 0:
-                insert_data_query = f"""
-                        INSERT INTO {table_name} (userid, movieid, rating) 
-                            SELECT userid, movieid, rating 
-                            FROM {ratingstablename} 
-                            WHERE rating >= {str(minRange)} AND rating <= {str(maxRange)};
-                """
+                cur.execute(f"""
+                    INSERT INTO {table_name}
+                    SELECT * FROM {ratingstablename}
+                    WHERE rating >= {i * interval} AND rating <= {(i + 1) * interval};
+                """)
             else:
-                insert_data_query = f"""
-                        INSERT INTO {table_name} (userid, movieid, rating) 
-                            SELECT userid, movieid, rating 
-                            FROM {ratingstablename} 
-                            WHERE rating > {str(minRange)} AND rating <= {str(maxRange)};
-                """
-            cur.execute(insert_data_query)
+                cur.execute(f"""
+                    INSERT INTO {table_name}
+                    SELECT * FROM {ratingstablename}
+                    WHERE rating > {i * interval} AND rating <= {(i + 1) * interval};
+                """)
 
-        # Commit Transaction
         openconnection.commit()
-        print(f"Successfully created {numberofpartitions} range partitions")
+
+        # Kết thúc đo thời gian
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Successfully created {numberofpartitions} range partitions in {elapsed_time:.4f} seconds.")
 
     except Exception as e:
-        # Rollback in case of error
         openconnection.rollback()
-        print(f"Error creating range partitions: {str(e)}")
-        raise e
+        print(f"Error in rangepartition: {str(e)}")
+        raise
 
     finally:
-        # Close cursor (but not connection as per requirement)
         cur.close()
 
-    end_time = time.time()
-    total_time = end_time - start_time
-    print(f"rangepartition completed in {total_time:.4f} seconds")
-
-
 def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
-    start_time = time.time()
+    """
+    Function to create partitions of main table using round robin approach.
 
+    Args:
+        ratingstablename (str): Name of the main ratings table
+        numberofpartitions (int): Number of partitions to create
+        openconnection: PostgreSQL connection object
+    """
+    start_time = time.time()  
     cur = openconnection.cursor()
     RROBIN_TABLE_PREFIX = 'rrobin_part'
 
@@ -209,7 +204,9 @@ def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
 
         # Commit the transaction
         openconnection.commit()
-        print(f"Successfully created {numberofpartitions} round robin partitions")
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Successfully created {numberofpartitions} round robin partitions in {elapsed_time:.4f} seconds.")
 
     except Exception as e:
         # Rollback in case of error
@@ -220,11 +217,6 @@ def roundrobinpartition(ratingstablename, numberofpartitions, openconnection):
     finally:
         # Close cursor (but not connection as per requirement)
         cur.close()
-
-    end_time = time.time()
-    total_time = end_time - start_time
-    print(f"roundrobinpartition completed in {total_time:.4f} seconds")
-
 
 def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
     start_time = time.time()
